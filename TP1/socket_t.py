@@ -13,6 +13,31 @@ class Socket:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.settimeout(0.1)
         return self.socket
+    
+    def send(self, message, n=1):
+        # send a requisition and wait for response
+        resp = []
+        json_message = json.dumps(message)
+        self.socket.sendto(json_message.encode(), (self.host, self.port))
+        while len(resp) < n:
+            # wait for response
+            try:
+                data, _ = self.socket.recvfrom(1024)
+                data = json.loads(data.decode())
+                if data['type'] == 'gameover':
+                    raise GameOver()
+                resp.append(data)
+
+            except socket.timeout:
+                if not len(resp):
+                    return self.send(message)
+                break
+            except json.decoder.JSONDecodeError as e:
+                if 'gameover' in str(data):
+                    raise GameOver()
+        if len(resp) == 1:
+            return resp[0]
+        return resp
 
     def close(self):
         if self.socket:
