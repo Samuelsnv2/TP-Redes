@@ -14,11 +14,33 @@ class Socket:
         self.socket.settimeout(0.1)
         return self.socket
     
-    def send(self, message, n=1):
-        # send a requisition and wait for response
-        resp = []
+    def sendM(self, message):
+        # send a message to the server
         json_message = json.dumps(message)
         self.socket.sendto(json_message.encode(), (self.host, self.port))
+        return self.socket
+
+    def recvM(self):
+        # receive a message from the server
+        try:
+            data, _ = self.socket.recvfrom(1024)
+            data = json.loads(data.decode())
+            if data['type'] == 'gameover':
+                raise GameOver()
+            return data
+        except socket.timeout:
+            return None
+
+    def send(self, message, n=1):
+        # send a requisition and wait for response
+        resp_type = {'authreq': 'authresp', 'getcannons': 'cannons', 'getturn': 'state', 'shot': 'shotresp'}
+        resp = []
+        json_message = json.dumps(message)
+        try:
+            self.socket.send(json_message.encode(), (self.host, self.port))
+        except Exception as e:
+            print(e)
+            raise GameOver()
         while len(resp) < n:
             # wait for response
             try:
@@ -26,11 +48,13 @@ class Socket:
                 data = json.loads(data.decode())
                 if data['type'] == 'gameover':
                     raise GameOver()
-                resp.append(data)
-
+                if type == 'quit':
+                    return data
+                if data['type'] == resp_type[message['type']]:
+                    resp.append(data)
             except socket.timeout:
                 if not len(resp):
-                    return self.send(message)
+                    return self.send(message, n)
                 break
             except json.decoder.JSONDecodeError as e:
                 if 'gameover' in str(data):
@@ -50,10 +74,12 @@ class Socket:
 class ServerError(Exception):
     # authentication failed exception
     def __init__(self, message='Auth Failed'):
+        self.message = message
         super().__init__(self.message)
 
 class GameOver(ServerError):
     # Game Over exception
-    def __init__(self, message='GameOver'):
+    def __init__(self, message='GameOver', data=''):
         self.message = message
+        self.data = data
         super().__init__(self.message)
