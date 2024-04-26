@@ -1,6 +1,6 @@
 import socket
-import sys
 import struct
+import sys
 
 def auth(host, port, command):
     host = str(host).strip()

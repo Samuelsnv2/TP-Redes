@@ -34,7 +34,7 @@ class Game:
             except KeyboardInterrupt:
                 print('Exiting...')
             except GameOver as e:
-                running = "running game"
+                running = 'running game'
                 if running in e.data["description"]:
                     self.quit()
                     for s in self.sockets:
@@ -109,9 +109,9 @@ class Game:
             t.join()
     
     def shotMessage(self, target):
-        x, y, boat_id, river = target
+        x, y, id, river = target
         try:
-            message = {'auth': self.auth_token, 'type': 'shot', 'x': x, 'y': y, 'boat_id': boat_id}
+            message = {'auth': self.auth_token, 'type': 'shot', 'x': x, 'y': y, 'id': id}
             self.sockets[river].send(message)
             with self.condition:
                 self.condition.notify_all()
@@ -129,8 +129,8 @@ class Game:
                     if r['status'] != 0:
                         raise ServerError(message = 'Shot gone wrong'+str(r))
                     x,y = r['cannon']
-                    boat_id = r['boat_id']
-                    target = (x, y, boat_id, river)
+                    id = r['id']
+                    target = (x, y, id, river)
                     with self.condition:
                         if target in self.shot_list:
                             self.shot_list.remove(target)
@@ -179,14 +179,14 @@ class Game:
     
     def shotStrategy(self):
         # get the best shot strategy
-        shot_list = []
+        poss_shot = []
         poss_targets = self.getTargets()
         for x, y_dict in poss_targets:
             for y, boats in y_dict.items():
-                shot_list.append((x, y, 
+                poss_shot.append((x, y, 
                                   self.getWeakBoat(boats)['id'], 
                                   self.getWeakBoat(boats)['river']))
-        return set(shot_list)
+        return set(poss_shot)
 
     def quit(self):
         # send quit message to all sockets
