@@ -1,12 +1,9 @@
 from auth.client import *
 from game import *
 
-import json
-import socket
-import time
-
+#host = 'pugna.snes.dcc.ufmg.br'
 host = 'pugna.snes.dcc.ufmg.br'
-port = 51121
+port = 51113
 
 command1 = ['itr', '2021078455', 20]
 token1 = auth(host, port, command1)
@@ -17,7 +14,7 @@ token2 = auth(host, port, command2)
 command3 = ['gtr', '2', token1, token2]
 token = auth(host, port, command3)
 
-game = Game(host, port, token)
+game = Game(host, port, token=token)
 game.authreq()
 game.getCannons()
 
