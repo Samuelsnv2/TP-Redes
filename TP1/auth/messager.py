@@ -1,4 +1,3 @@
-import re
 import socket
 import struct
 
@@ -66,7 +65,7 @@ class messager:
         packet_format = '>2s 12s I 64s'
         vals = struct.unpack(packet_format, response)
         id, nonce, token = vals[1], vals[2], vals[3]
-        response = f'{id.decode('ascii')}:{nonce}:{token.decode('ascii')}'
+        response = f'{id.decode("ascii")}:{nonce}:{token.decode("ascii")}'
         return response
     
     def itv_request(self, params):
@@ -104,8 +103,8 @@ class messager:
         packet_format = self.packet_format + '64s'
         vals = struct.unpack(packet_format, response)
         bl = [vals[i:i+3] for i in range(2, len(vals)-2, 3)]
-        sas = '+'.join([f'{id.decode('ascii')}:{nonce}:{token.decode('ascii')}' for id, nonce, token in bl])
-        token = vals[-1].decode('ascii')
+        sas = '+'.join([f'{id.decode("ascii")}:{nonce}:{token.decode("ascii")}' for id, nonce, token in bl])
+        token = vals[-1].decode("ascii")
         return sas + '+' + token
     
     def gtv_request(self, params):

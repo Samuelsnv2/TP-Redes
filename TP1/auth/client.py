@@ -1,7 +1,5 @@
 from auth.messager import *
 import socket
-import struct
-import sys
 
 def auth(host, port, command):
     '''
@@ -16,7 +14,7 @@ def auth(host, port, command):
     except Exception as e:
         return e
     sock = socket.socket(determineIpType(host), socket.SOCK_STREAM) # create a socket
-    sock.settimout(404)
+    sock.settimeout(404)
     try:
         sock.connect((host, port))
         packet = messager_o.request(command[1:])
