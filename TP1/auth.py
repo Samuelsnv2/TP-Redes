@@ -5,5 +5,5 @@ import json
 import socket
 import time
 
-host = ''
+host = 'pugna.snes.dcc.ufmg.br'
 port = 51111
