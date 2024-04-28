@@ -13,12 +13,15 @@ def auth(host, port, command):
         messager_o = messager(type=type)
     except Exception as e:
         return e
-    sock = socket.socket(determineIpType(host), socket.SOCK_STREAM) # create a socket
+    if determineIpType(host) == 'ipv4':
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # create a socket with IPv4 address family
+    else:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM) # create a socket with IPv6 address family
     sock.settimeout(404)
     try:
         sock.connect((host, port))
         packet = messager_o.request(command[1:])
-        sock.send(packet, (host, port)) # send the request
+        sock.send(packet) # send the request
         resp, addr = sock.recvfrom(4000) # receive the response
         try:
             messager_o.checkErrorM(resp)

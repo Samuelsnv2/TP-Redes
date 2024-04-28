@@ -3,7 +3,7 @@ from game import *
 
 #host = 'pugna.snes.dcc.ufmg.br'
 host = 'pugna.snes.dcc.ufmg.br'
-port = 51113
+port = 51111
 
 command1 = ['itr', '2021078455', 20]
 token1 = auth(host, port, command1)
@@ -18,7 +18,7 @@ game = Game(host, port, token=token)
 game.authreq()
 game.getCannons()
 
-while game.getturn():
+while game.getTurn():
     game.shot()
     game.turn += 1
 
