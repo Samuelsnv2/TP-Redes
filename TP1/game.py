@@ -10,7 +10,7 @@ class Game:
         self.host = host
         self.port = port
         
-        # start the game logic:
+        # start the game logic
         self.turn = 0
         self.cannons = []
         self.state = []
