@@ -4,9 +4,9 @@ import time
 
 # Constants
 SYNC = 0xDCC023C2
-HEADER_SIZE = 12  # SYNC (x2) + checksum + length + ID + flags
+HEADER_SIZE = 14  # SYNC (x2) + checksum + length + ID + flags  
 MAX_PAYLOAD = 4096
-RETRANSMIT_TIMEOUT = 1.0  # Retransmission timeout in seconds
+RETRANSMIT_TIMEOUT = 1.0 
 MAX_RETRIES = 16
 
 # Flags
@@ -26,42 +26,61 @@ def internet_checksum(data):
     checksum = 0
     n = len(data)
     i = 0
-
-    while i < n:
-        if (i + 1) < n:
-            c1 = data[i] << 8
-            c2 = data[i + 1]
-            checksum += (c1 + c2)
-        elif i == n - 1:
-            checksum += data[i] << 8
+    while n > 1:
+        checksum += (data[i] << 8) + data[i + 1]  # Combine bytes into words
         i += 2
-
-    while checksum >> 16:
+        n -= 2
+        checksum = (checksum & 0xFFFF) + (checksum >> 16)  # 16-bit carry handling
+    if n == 1:  # Handle odd-length case
+        checksum += data[i] << 8
         checksum = (checksum & 0xFFFF) + (checksum >> 16)
-
     checksum = ~checksum & 0xFFFF
     return checksum
 
-# Encode a DCCNET frame into a byte array
+# Encode a DCCNET frame
 def encode_frame(frame):
-    header = struct.pack('>IIHBB', SYNC, SYNC, 0, len(frame.payload), frame.id, frame.flags)
-    checksum = internet_checksum(header + frame.payload)
-    header = struct.pack('>IIHBB', SYNC, SYNC, checksum, len(frame.payload), frame.id, frame.flags)
+    # 1. Pack the header with a placeholder checksum of 0
+    header = struct.pack('!IIHHBB', SYNC, SYNC, 0, len(frame.payload), frame.id, frame.flags) 
+    
+    print(f"Header before checksum: {header!r}")  # Print header bytes
+    print(f"Payload: {frame.payload!r}")  # Print payload bytes
+
+    data_to_checksum = header + frame.payload
+    print(f"Data to checksum: {data_to_checksum!r}")  # Print combined data
+
+    checksum = internet_checksum(data_to_checksum)
+    print(f"Encoded Checksum: {checksum:04X}")  # Debugging: Print calculated checksum
+    
+    # 3. Repack the header with the correct checksum
+    header = struct.pack('>IIHHBB', SYNC, SYNC, checksum, len(frame.payload), frame.id, frame.flags) 
+    
     return header + frame.payload
 
-# Decode a byte array into a DCCNET frame
+# Decode a DCCNET frame
 def decode_frame(data):
-    header = struct.unpack('>IIHBB', data[:HEADER_SIZE])
+    if len(data) < HEADER_SIZE:
+        return None  # Not enough data for a header
+
+    header = struct.unpack('!IIHHBB', data[:HEADER_SIZE])
     sync1, sync2, checksum, length, id, flags = header
+
     if sync1 != SYNC or sync2 != SYNC:
         raise ValueError("Invalid SYNC pattern")
 
-    payload = data[HEADER_SIZE:]
-    if len(payload) != length:
-        raise ValueError("Invalid payload length")
+    # Ensure we have the complete frame before checksum verification
+    if len(data) < HEADER_SIZE + length:
+        return None  
 
-    calculated_checksum = internet_checksum(data)
+    payload = data[HEADER_SIZE:HEADER_SIZE + length]
+
+    print(f"Received header: {header!r}")  # Print received header
+    print(f"Received payload: {payload!r}")  # Print received payload
+
+    # Calculate checksum on the complete header
+    calculated_checksum = internet_checksum(data[:HEADER_SIZE])
+    print(f"Decoded Checksum: {checksum:04X}, Calculated: {calculated_checksum:04X}")  # Debugging
     if calculated_checksum != checksum:
+        print(f"Checksum mismatch: Expected {checksum:04X}, Calculated {calculated_checksum:04X}")
         raise ValueError("Checksum mismatch")
 
     return DCCNETFrame(id, flags, payload)
@@ -73,14 +92,15 @@ class DCCNETConnection:
 
         self.current_id = 0  # ID of the next frame to send
         self.last_received_id = None  # ID of the last correctly received frame
-        self.last_received_checksum = None  # Checksum of the last received frame
+        self.send_buffer = b''  # Buffer for incomplete messages
         self.send_timer = None  # Timer for retransmissions
         self.retry_count = 0
+        self.last_sent_frame = None
 
     def send_data(self, data):
         frame = DCCNETFrame(self.current_id, 0, data)
-        encoded_frame = encode_frame(frame)
-        self.sock.sendall(encoded_frame)
+        self.last_sent_frame = encode_frame(frame)  # Store the last sent frame
+        self.sock.sendall(self.last_sent_frame)
 
         # Start the retransmission timer if not already running
         if not self.send_timer:
@@ -88,66 +108,69 @@ class DCCNETConnection:
             self.retry_count = 1
 
     def receive_data(self):
-        while True:  # Continuously attempt to receive frames
+        while True:
             try:
-                data = self.sock.recv(HEADER_SIZE + MAX_PAYLOAD)
-                if not data:  # Connection closed by the remote end
+                data = self.sock.recv(4096)
+                if not data:
                     break
+                self.send_buffer += data
+            except socket.error as e:
+                print(f"Error receiving data: {e}")
+                break
 
-                frame = decode_frame(data)
+            while True:
+                frame = decode_frame(self.send_buffer)
+                if frame is None:
+                    break  # Incomplete frame, wait for more data
 
-                # Validate and process the received frame
+                self.send_buffer = self.send_buffer[HEADER_SIZE + len(frame.payload):]
+
                 if self.is_valid_frame(frame):
                     self.last_received_id = frame.id
-                    self.last_received_checksum = internet_checksum(data)  # Store for retransmission detection
-                    self.send_ack()  # Send acknowledgement
-                    if frame.flags & END_FLAG:
-                        # Handle end-of-transmission
-                        self.sock.close()
-                        break
-                    return frame.payload  # Return received data
+                    self.send_ack()
+                    if frame.flags & ACK_FLAG:
+                        self.current_id += 1
+                        if self.send_timer:
+                            self.send_timer = None
+                            self.retry_count = 0
+                    else:
+                        return frame.payload
 
-            except (ValueError, socket.error) as e:
-                # Handle framing errors, checksum mismatches, socket errors
-                print(f"Error receiving frame: {e}")  # Replace with proper logging
+            # Handle timeout only after processing received data
+            self.handle_timeout() 
 
     def is_valid_frame(self, frame):
         # Frame validation logic
         if frame.flags & ACK_FLAG:
             # Acknowledgement frame
-            return frame.id == self.current_id  # Check if it acknowledges the last sent frame
+            return frame.id == self.current_id - 1  # ACK should match the previous frame ID
         elif frame.flags & RST_FLAG:
             # Reset frame
-            self.sock.close()  # Close connection
-            # ... (optional: process RST payload)
-            return False  # Do not process further
+            self.sock.close()
+            return False
         else:
             # Data frame
-            if frame.id == self.last_received_id and frame.payload == self.last_received_checksum:
-                # Retransmission
-                self.send_ack()  # Re-send acknowledgement
-                return False  # Do not process as new data
-            else:
-                # New data frame
-                return frame.id != self.current_id  # Accept if ID is different from the last sent frame
+            if self.last_received_id is not None and frame.id <= self.last_received_id:
+                # Ignore duplicate or out-of-order frames
+                return False
+            return True 
 
     def send_ack(self):
         ack_frame = DCCNETFrame(self.last_received_id, ACK_FLAG)
         self.sock.sendall(encode_frame(ack_frame))
 
     def handle_timeout(self):
-        # Retransmission logic when the timer expires
-        if self.retry_count < MAX_RETRIES:
-            # Resend the unacknowledged frame
-            # ... (retrieve and re-send the last sent frame)
-            self.send_timer = time.time()  # Restart the timer
-            self.retry_count += 1
-        else:
-            # Handle unrecoverable error (e.g., RST)
-            self.send_rst()
-            self.sock.close()
+        if self.send_timer and time.time() - self.send_timer > RETRANSMIT_TIMEOUT:
+            if self.retry_count < MAX_RETRIES:
+                # Resend the unacknowledged frame
+                self.sock.sendall(self.last_sent_frame)
+                self.send_timer = time.time()
+                self.retry_count += 1
+            else:
+                # Handle unrecoverable error
+                self.send_rst()
+                self.sock.close()
 
     def send_rst(self):
-        rst_frame = DCCNETFrame(0xFFFF, RST_FLAG)  # ID set to 0xFFFF for RST
-        # ... (optional: add payload to RST frame)
+        rst_frame = DCCNETFrame(0, RST_FLAG)  # Use ID 0 for RST  
         self.sock.sendall(encode_frame(rst_frame))
