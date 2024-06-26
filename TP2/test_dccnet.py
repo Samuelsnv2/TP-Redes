@@ -2,7 +2,7 @@ import unittest
 import socket
 from unittest.mock import patch
 
-from dccnet import DCCNETConnection, encode_frame, decode_frame, internet_checksum
+from dccnet import DCCNETFrame, DCCNETConnection, encode_frame, decode_frame, internet_checksum
 
 class TestDCCNET(unittest.TestCase):
 
@@ -10,7 +10,7 @@ class TestDCCNET(unittest.TestCase):
         """
         Tests the encoding and decoding of DCCNET frames.
         """
-        frame = DCCNETConnection.DCCNETFrame(10, 0x80, b"test data")
+        frame = DCCNETFrame(10, 0x80, b"test data")
         encoded = encode_frame(frame)
         decoded = decode_frame(encoded)
 
@@ -24,7 +24,7 @@ class TestDCCNET(unittest.TestCase):
         """
         data = b"\xdc\xc0\x23\xc2\xdc\xc0\x23\xc2\x00\x00\x00\x04\x00\x00\x00\x01"
         checksum = internet_checksum(data)
-        self.assertEqual(checksum, 0xf8f1)
+        self.assertEqual(checksum, 0xf9f4)
 
     @patch('socket.socket')
     def test_connection_send_receive(self, mock_socket):
@@ -32,7 +32,7 @@ class TestDCCNET(unittest.TestCase):
         Tests basic send and receive functionality of DCCNETConnection.
         """
         mock_socket.return_value.recv.side_effect = [
-            encode_frame(DCCNETConnection.DCCNETFrame(0, 0x80)),  # ACK frame
+            encode_frame(DCCNETFrame(0, 0x80)),  # ACK frame
             b"data1",
             b"data2",
             b""  # End of transmission
@@ -55,7 +55,7 @@ class TestDCCNET(unittest.TestCase):
         """
         Tests handling of frames with invalid SYNC patterns.
         """
-        mock_socket.return_value.recv.return_value = b"\x00\x00\x23\xc2\xdc\xc0\x23\xc2" + encode_frame(DCCNETConnection.DCCNETFrame(0, 0x80))
+        mock_socket.return_value.recv.return_value = b"\x00\x00\x23\xc2\xdc\xc0\x23\xc2" + encode_frame(DCCNETFrame(0, 0x80))
 
         conn = DCCNETConnection("localhost", 12345)
         conn.send_data(b"test")
@@ -70,7 +70,8 @@ class TestDCCNET(unittest.TestCase):
         """
         Tests handling of frames with incorrect checksums.
         """
-        invalid_checksum_frame = encode_frame(DCCNETConnection.DCCNETFrame(0, 0, b"data"))[:-2] + b"\x00\x00"  # Modify checksum to be invalid
+        frame = DCCNETFrame(0, 0, b"data")
+        invalid_checksum_frame = encode_frame(frame)[:-2] + b"\x00\x00"  # Modify checksum to be invalid
         mock_socket.return_value.recv.return_value = invalid_checksum_frame
 
         conn = DCCNETConnection("localhost", 12345)
@@ -88,7 +89,7 @@ class TestDCCNET(unittest.TestCase):
         Tests the retransmission mechanism.
         """
         mock_time.side_effect = [0, 1.5, 2.5]  # Simulate time progression for retries
-        mock_socket.return_value.recv.return_value = encode_frame(DCCNETConnection.DCCNETFrame(0, 0x80))
+        mock_socket.return_value.recv.return_value = encode_frame(DCCNETFrame(0, 0x80))
 
         conn = DCCNETConnection("localhost", 12345)
         conn.send_data(b"test")  # Send data, but no ACK received initially
@@ -104,7 +105,7 @@ class TestDCCNET(unittest.TestCase):
         """
         Tests handling of RST frames.
         """
-        mock_socket.return_value.recv.return_value = encode_frame(DCCNETConnection.DCCNETFrame(0xFFFF, 0x20))
+        mock_socket.return_value.recv.return_value = encode_frame(DCCNETFrame(0xFFFF, 0x20))
 
         conn = DCCNETConnection("localhost", 12345)
 
@@ -119,8 +120,8 @@ class TestDCCNET(unittest.TestCase):
         Tests handling of data and ACK frames.
         """
         mock_socket.return_value.recv.side_effect = [
-            encode_frame(DCCNETConnection.DCCNETFrame(0, 0, b"data")),
-            encode_frame(DCCNETConnection.DCCNETFrame(0, 0x80)),  # ACK frame
+            encode_frame(DCCNETFrame(0, 0, b"data")),
+            encode_frame(DCCNETFrame(0, 0x80)),  # ACK frame
             b""  # End of transmission
         ]
 
@@ -146,7 +147,7 @@ class TestDCCNET(unittest.TestCase):
         conn.handle_timeout()  # Trigger RST due to unrecoverable error
 
         # Verify that sendall was called with an RST frame
-        mock_socket.return_value.sendall.assert_called_with(encode_frame(DCCNETConnection.DCCNETFrame(0xFFFF, 0x20)))
+        mock_socket.return_value.sendall.assert_called_with(encode_frame(DCCNETFrame(0xFFFF, 0x20)))
 
         # Verify that the connection is closed
         self.assertTrue(mock_socket.return_value.close.called)

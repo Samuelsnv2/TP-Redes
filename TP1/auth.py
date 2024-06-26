@@ -2,7 +2,7 @@ from auth.client import *
 from game import *
 
 #host = 'pugna.snes.dcc.ufmg.br'
-host = 'pugna.snes.dcc.ufmg.br'
+host = 'rubick.snes.2advanced.dev'
 port = 51111
 
 command1 = ['itr', '2021078455', 20]
