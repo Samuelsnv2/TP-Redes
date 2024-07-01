@@ -26,61 +26,72 @@ def internet_checksum(data):
     checksum = 0
     n = len(data)
     i = 0
-    while n > 1:
-        checksum += (data[i] << 8) + data[i + 1]  # Combine bytes into words
+
+    # Handle data in 16-bit chunks
+    while i < n - 1:
+        w = (data[i] << 8) | data[i + 1]  # Combine bytes into a 16-bit word
+        checksum += w
         i += 2
-        n -= 2
-        checksum = (checksum & 0xFFFF) + (checksum >> 16)  # 16-bit carry handling
-    if n == 1:  # Handle odd-length case
-        checksum += data[i] << 8
-        checksum = (checksum & 0xFFFF) + (checksum >> 16)
-    checksum = ~checksum & 0xFFFF
-    return checksum
+
+    # Handle the last byte if the data length is odd
+    if n % 2:
+        checksum += data[i] << 8  # Left-shift the last byte
+
+    # Fold 32-bit checksum to 16 bits
+    checksum = (checksum >> 16) + (checksum & 0xFFFF)
+    checksum += (checksum >> 16)  # Add carry if any
+
+    return ~checksum & 0xFFFF  # One's complement and mask to 16 bits
 
 # Encode a DCCNET frame
 def encode_frame(frame):
     # 1. Pack the header with a placeholder checksum of 0
-    header = struct.pack('!IIHHBB', SYNC, SYNC, 0, len(frame.payload), frame.id, frame.flags) 
-    
-    print(f"Header before checksum: {header!r}")  # Print header bytes
-    print(f"Payload: {frame.payload!r}")  # Print payload bytes
+    header_without_checksum = struct.pack('!IIHHBB', SYNC, SYNC, 0, len(frame.payload), frame.id, frame.flags)
 
-    data_to_checksum = header + frame.payload
-    print(f"Data to checksum: {data_to_checksum!r}")  # Print combined data
-
+    # 2. Calculate checksum over header (with 0 checksum) and payload
+    data_to_checksum = header_without_checksum + frame.payload
     checksum = internet_checksum(data_to_checksum)
-    print(f"Encoded Checksum: {checksum:04X}")  # Debugging: Print calculated checksum
-    
+
     # 3. Repack the header with the correct checksum
-    header = struct.pack('>IIHHBB', SYNC, SYNC, checksum, len(frame.payload), frame.id, frame.flags) 
-    
+    header = struct.pack('!IIHHBB', SYNC, SYNC, checksum, len(frame.payload), frame.id, frame.flags)
+
+    print(f"Header before checksum: {header_without_checksum!r}")
+    print(f"Payload: {frame.payload!r}")
+    print(f"Data to checksum: {data_to_checksum!r}")
+    print(f"Encoded Checksum: {checksum:04X}")
+
     return header + frame.payload
 
 # Decode a DCCNET frame
 def decode_frame(data):
     if len(data) < HEADER_SIZE:
-        return None  # Not enough data for a header
+        return None
 
-    header = struct.unpack('!IIHHBB', data[:HEADER_SIZE])
-    sync1, sync2, checksum, length, id, flags = header
+    # Unpack header, but exclude the checksum field for now
+    sync1, sync2, _, length, id, flags = struct.unpack('!IIHHBB', data[:HEADER_SIZE])
 
     if sync1 != SYNC or sync2 != SYNC:
         raise ValueError("Invalid SYNC pattern")
 
-    # Ensure we have the complete frame before checksum verification
     if len(data) < HEADER_SIZE + length:
-        return None  
+        return None
 
     payload = data[HEADER_SIZE:HEADER_SIZE + length]
 
-    print(f"Received header: {header!r}")  # Print received header
-    print(f"Received payload: {payload!r}")  # Print received payload
+    # Now, extract the received checksum from the header
+    received_checksum = struct.unpack('!H', data[8:10])[0]
 
-    # Calculate checksum on the complete header
-    calculated_checksum = internet_checksum(data[:HEADER_SIZE])
-    print(f"Decoded Checksum: {checksum:04X}, Calculated: {calculated_checksum:04X}")  # Debugging
-    if calculated_checksum != checksum:
-        print(f"Checksum mismatch: Expected {checksum:04X}, Calculated {calculated_checksum:04X}")
+    # Calculate checksum on header (with 0 checksum) and payload
+    data_to_checksum = bytearray(data)  # Create a mutable copy
+    data_to_checksum[8:10] = b'\x00\x00'  # Zero out the checksum field
+    calculated_checksum = internet_checksum(data_to_checksum)
+
+    print(f"Received header: {(sync1, sync2, received_checksum, length, id, flags)!r}")
+    print(f"Received payload: {payload!r}")
+    print(f"Decoded Checksum: {received_checksum:04X}, Calculated: {calculated_checksum:04X}")
+
+    if calculated_checksum != received_checksum:
+        print(f"Checksum mismatch: Expected {received_checksum:04X}, Calculated {calculated_checksum:04X}")
         raise ValueError("Checksum mismatch")
 
     return DCCNETFrame(id, flags, payload)
@@ -96,6 +107,12 @@ class DCCNETConnection:
         self.send_timer = None  # Timer for retransmissions
         self.retry_count = 0
         self.last_sent_frame = None
+        
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.sock.close()
 
     def send_data(self, data):
         frame = DCCNETFrame(self.current_id, 0, data)
@@ -109,6 +126,8 @@ class DCCNETConnection:
 
     def receive_data(self):
         while True:
+            if len(self.send_buffer) < HEADER_SIZE:
+                break  # Incomplete frame, wait for more data
             try:
                 data = self.sock.recv(4096)
                 if not data:
@@ -119,6 +138,11 @@ class DCCNETConnection:
                 break
 
             while True:
+                print(f"Received raw data: {self.send_buffer!r}")
+
+                if len(self.send_buffer) < HEADER_SIZE:
+                    break  # Incomplete frame, wait for more data
+
                 frame = decode_frame(self.send_buffer)
                 if frame is None:
                     break  # Incomplete frame, wait for more data

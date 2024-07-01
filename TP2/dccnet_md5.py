@@ -4,7 +4,7 @@ import socket
 from dccnet import DCCNETConnection  # Import your DCCNET implementation
 
 SERVER_HOST = "rubick.snes.2advanced.dev"  # Replace with the actual server
-SERVER_PORT = 51001  # Replace with the actual port
+SERVER_PORT = 51555  # Replace with the actual port
 
 def md5_app(host, port):
     with DCCNETConnection(host, port) as conn:

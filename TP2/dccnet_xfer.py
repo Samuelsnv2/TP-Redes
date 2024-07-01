@@ -6,17 +6,17 @@ from dccnet import DCCNETConnection  # Import your DCCNET implementation
 
 BUFFER_SIZE = 4096  # Size of data chunks for transfer
 
-def xfer_client(host, port, input_file, output_file):
+def xfer_client(host_port, input_file, output_file):
     """
     Implements the client-side functionality for file transfer.
 
     Args:
-        host: IP address of the server.
-        port: Port number of the server.
+        host_port: IP address and port number of the server in format <IP>:<PORT>.
         input_file: Path to the file to be sent.
         output_file: Path to the file where received data will be stored.
     """
-    with DCCNETConnection(host, port) as conn:
+    host, port = host_port.split(':')
+    with DCCNETConnection(host, int(port)) as conn:
         # Send file data
         with open(input_file, 'rb') as f:
             while True:
@@ -71,8 +71,8 @@ def xfer_server(port, input_file, output_file):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="DCCNET File Transfer Application")
     parser.add_argument("-s", "--server", type=int, help="Run as server (specify port)")
-    parser.add_argument("-c", "--client", nargs=2, metavar=('HOST', 'PORT'), type=str,
-                        help="Run as client (specify host and port)")
+    parser.add_argument("-c", "--client", type=str,
+                        help="Run as client (specify host and port in format <IP>:<PORT>)")
     parser.add_argument("input", type=str, help="Input file path")
     parser.add_argument("output", type=str, help="Output file path")
     args = parser.parse_args()
@@ -80,6 +80,6 @@ if __name__ == "__main__":
     if args.server:
         xfer_server(args.server, args.input, args.output)
     elif args.client:
-        xfer_client(args.client[0], int(args.client[1]), args.input, args.output)
+        xfer_client(args.client, args.input, args.output)
     else:
         parser.print_help()
